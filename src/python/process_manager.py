@@ -4,19 +4,22 @@ import time
 import os
 import urllib.parse
 import psutil
-from typing import Optional, List, Tuple
+from typing import Optional, List
+from .logger import SecureLogger
+
+logger = SecureLogger()
 
 class ProcessManager:
     """Менеджер процессов для управления Steam и CS2"""
     
-    # Параметры запуска Steam (минимальные, чтобы не мешать работе)
     STEAM_LAUNCH_OPTIONS = [
         "-nofriendsui",
         "-noreactlogin",
-        "-no-cef-sandbox"
+        "-no-cef-sandbox",
+        "-silent",
+        "-tcp"
     ]
     
-    # Параметры запуска CS2 (оптимизированные для фарма)
     CS2_LAUNCH_OPTIONS = [
         "-windowed",
         "-w", "640",
@@ -28,16 +31,13 @@ class ProcessManager:
         "+engine_no_focus_sleep", "120",
         "+mat_disable_fancy_blending", "1",
         "+r_dynamic", "0",
-        "+violence_hblood", "0"
+        "+violence_hblood", "0",
+        "-high"
     ]
 
     @staticmethod
     def find_steam_path() -> Optional[str]:
-        """
-        Поиск пути к steam.exe
-        Возвращает полный путь или None если не найден
-        """
-        # Стандартные пути установки
+        """Поиск пути к steam.exe"""
         paths = [
             r"C:\Program Files (x86)\Steam\steam.exe",
             r"C:\Program Files\Steam\steam.exe",
@@ -45,61 +45,60 @@ class ProcessManager:
             r"E:\Steam\steam.exe",
         ]
         
-        # Проверка из реестра Windows
         try:
             import winreg
-            # Пробуем HKLM
-            try:
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam") as key:
-                    steam_path = winreg.QueryValueEx(key, "SteamPath")[0]
-                    steam_exe = os.path.join(steam_path, "steam.exe")
-                    if os.path.exists(steam_exe):
-                        print(f"[ProcessManager] ✅ Steam найден в реестре: {steam_exe}")
-                        return steam_exe
-            except FileNotFoundError:
-                pass
-            
-            # Пробуем HKCU
-            try:
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\Valve\Steam") as key:
-                    steam_path = winreg.QueryValueEx(key, "SteamPath")[0]
-                    steam_exe = os.path.join(steam_path, "steam.exe")
-                    if os.path.exists(steam_exe):
-                        print(f"[ProcessManager] ✅ Steam найден в реестре (HKCU): {steam_exe}")
-                        return steam_exe
-            except FileNotFoundError:
-                pass
+            for key_path in [r"SOFTWARE\Valve\Steam", r"SOFTWARE\WOW6432Node\Valve\Steam"]:
+                try:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as key:
+                        steam_path = winreg.QueryValueEx(key, "SteamPath")[0]
+                        steam_exe = os.path.join(steam_path, "steam.exe")
+                        if os.path.exists(steam_exe):
+                            logger.info(f"[ProcessManager] ✅ Steam найден в реестре: {steam_exe}")
+                            return steam_exe
+                except FileNotFoundError:
+                    continue
         except Exception as e:
-            print(f"[ProcessManager] ⚠️ Ошибка чтения реестра: {e}")
+            logger.error(f"[ProcessManager] ⚠️ Ошибка чтения реестра: {e}")
         
-        # Проверка стандартных путей
         for path in paths:
             if os.path.exists(path):
-                print(f"[ProcessManager] ✅ Steam найден: {path}")
+                logger.info(f"[ProcessManager] ✅ Steam найден: {path}")
                 return path
         
-        print(f"[ProcessManager] ❌ Steam не найден ни в одном из стандартных расположений")
+        logger.error(f"[ProcessManager] ❌ Steam не найден")
         return None
 
     @staticmethod
     def kill_all_steam():
         """Завершение всех процессов Steam"""
-        print("[ProcessManager] Завершение всех процессов Steam...")
+        logger.info("[ProcessManager] Завершение всех процессов Steam...")
         os.system("taskkill /f /im steam.exe 2>nul")
         os.system("taskkill /f /im steamwebhelper.exe 2>nul")
         time.sleep(3)
-        print("[ProcessManager] ✅ Процессы Steam завершены")
+        logger.info("[ProcessManager] ✅ Процессы Steam завершены")
 
     @staticmethod
     def is_steam_running() -> bool:
         """Проверка, запущен ли Steam"""
-        for proc in psutil.process_iter(['name']):
+        for proc in psutil.process_iter(['name', 'pid']):
             try:
                 if proc.info['name'] and proc.info['name'].lower() == 'steam.exe':
                     return True
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
         return False
+
+    @staticmethod
+    def get_steam_pids() -> List[int]:
+        """Получение PID всех процессов Steam"""
+        pids = []
+        for proc in psutil.process_iter(['pid', 'name']):
+            try:
+                if proc.info['name'] and proc.info['name'].lower() == 'steam.exe':
+                    pids.append(proc.info['pid'])
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return pids
 
     @staticmethod
     def get_cs2_pids() -> List[int]:
@@ -116,23 +115,12 @@ class ProcessManager:
     @staticmethod
     def start_cs2(steam_path: str, ipc_name: Optional[str] = None, 
                   steam_data_dir: Optional[str] = None) -> bool:
-        """
-        Запуск CS2 через Steam с корректными параметрами.
-        
-        Args:
-            steam_path: Путь к steam.exe
-            ipc_name: Имя IPC для изоляции экземпляра Steam (для мультиаккаунта)
-            steam_data_dir: Папка данных Steam для этого аккаунта
-            
-        Returns:
-            True при успешном запуске команды
-        """
+        """Запуск CS2 через Steam"""
         try:
             steam_dir = os.path.dirname(steam_path)
             
             if ipc_name and steam_data_dir:
-                # === ЗАПУСК ЧЕРЕЗ STEAM С ПАРАМЕТРАМИ ИЗОЛЯЦИИ ===
-                print(f"[ProcessManager] 🎮 Запуск CS2 через Steam с IPC: {ipc_name}")
+                logger.info(f"[ProcessManager] 🎮 Запуск CS2 через Steam с IPC: {ipc_name}")
                 cmd = [
                     steam_path,
                     "-master_ipc_name_override", ipc_name,
@@ -140,34 +128,28 @@ class ProcessManager:
                     "-applaunch", "730"
                 ] + ProcessManager.CS2_LAUNCH_OPTIONS
                 
-                print(f"[ProcessManager] Команда: {' '.join(cmd)}")
+                logger.info(f"[ProcessManager] Команда: {' '.join(cmd)}")
                 subprocess.Popen(cmd, cwd=steam_dir, 
                                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
-                print(f"[ProcessManager] ✅ CS2 запущен через Steam с параметрами изоляции")
+                logger.info(f"[ProcessManager] ✅ CS2 запущен через Steam")
                 return True
             else:
-                # === ПРОСТОЙ ЗАПУСК ЧЕРЕЗ STEAM URI ===
-                print(f"[ProcessManager] 🎮 Запуск CS2 через Steam URI")
+                logger.info(f"[ProcessManager] 🎮 Запуск CS2 через Steam URI")
                 params = " ".join(ProcessManager.CS2_LAUNCH_OPTIONS)
                 encoded_params = urllib.parse.quote(params)
                 steam_uri = f"steam://rungameid/730/{encoded_params}"
                 
-                # Используем os.startfile для правильного handling URI
                 os.startfile(steam_uri)
-                print(f"[ProcessManager] ✅ CS2 запущен через URI: {steam_uri}")
+                logger.info(f"[ProcessManager] ✅ CS2 запущен через URI")
                 return True
                 
         except Exception as e:
-            print(f"[ProcessManager] ❌ Ошибка запуска CS2 через Steam: {e}")
-            # Фолбэк: прямой запуск cs2.exe
+            logger.error(f"[ProcessManager] ❌ Ошибка запуска CS2: {e}")
             return ProcessManager._fallback_launch(steam_path)
 
     @staticmethod
     def _fallback_launch(steam_path: str) -> bool:
-        """
-        Резервный метод запуска через прямой вызов cs2.exe
-        Используется если запуск через Steam не удался
-        """
+        """Резервный метод запуска"""
         try:
             steam_dir = os.path.dirname(steam_path)
             cs2_exe = os.path.join(
@@ -176,52 +158,88 @@ class ProcessManager:
             )
             
             if os.path.exists(cs2_exe):
-                print(f"[ProcessManager] 🎮 Фолбэк: прямой запуск cs2.exe")
+                logger.info(f"[ProcessManager] 🎮 Фолбэк: прямой запуск cs2.exe")
                 cmd = [cs2_exe] + ProcessManager.CS2_LAUNCH_OPTIONS
                 subprocess.Popen(cmd, cwd=os.path.dirname(cs2_exe),
                                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
-                print(f"[ProcessManager] ✅ CS2 запущен напрямую")
+                logger.info(f"[ProcessManager] ✅ CS2 запущен напрямую")
                 return True
             else:
-                print(f"[ProcessManager] ❌ cs2.exe не найден: {cs2_exe}")
+                logger.error(f"[ProcessManager] ❌ cs2.exe не найден: {cs2_exe}")
                 
         except Exception as e:
-            print(f"[ProcessManager] ❌ Фолбэк-запуск не удался: {e}")
+            logger.error(f"[ProcessManager] ❌ Фолбэк-запуск не удался: {e}")
         
         return False
 
     @staticmethod
     def kill_all():
         """Завершение всех процессов CS2"""
-        print("[ProcessManager] Завершение всех процессов CS2...")
+        logger.info("[ProcessManager] Завершение всех процессов CS2...")
         os.system("taskkill /f /im cs2.exe 2>nul")
         time.sleep(2)
-        print("[ProcessManager] ✅ Процессы CS2 завершены")
+        logger.info("[ProcessManager] ✅ Процессы CS2 завершены")
 
     @staticmethod
-    def wait_for_cs2(timeout: int = 60, check_interval: int = 2) -> bool:
-        """
-        Ожидание появления процесса CS2
-        
-        Args:
-            timeout: Максимальное время ожидания в секундах
-            check_interval: Интервал между проверками в секундах
-            
-        Returns:
-            True если CS2 запущен, False если таймаут
-        """
-        print(f"[ProcessManager] ⏳ Ожидание запуска CS2 (таймаут {timeout} сек)...")
+    def kill_steam_by_pid(pid: int):
+        """Завершение процесса Steam по PID"""
+        try:
+            proc = psutil.Process(pid)
+            for child in proc.children(recursive=True):
+                child.terminate()
+            proc.terminate()
+            logger.info(f"[ProcessManager] ✅ Steam PID {pid} завершён")
+            return True
+        except Exception as e:
+            logger.error(f"[ProcessManager] ❌ Ошибка завершения PID {pid}: {e}")
+            return False
+
+    @staticmethod
+    def wait_for_cs2(timeout: int = 120, check_interval: int = 3) -> bool:
+        """Ожидание появления процесса CS2"""
+        logger.info(f"[ProcessManager] ⏳ Ожидание запуска CS2 (таймаут {timeout} сек)...")
         start_time = time.time()
         attempt = 0
         
         while time.time() - start_time < timeout:
             attempt += 1
             pids = ProcessManager.get_cs2_pids()
+            
             if pids:
-                print(f"[ProcessManager] ✅ CS2 обнаружен на попытке {attempt} (PID: {pids})")
+                logger.info(f"[ProcessManager] ✅ CS2 обнаружен на попытке {attempt} (PID: {pids})")
                 return True
-            print(f"[ProcessManager] Попытка {attempt}: CS2 ещё не запущен...")
+            
+            for proc in psutil.process_iter(['pid', 'name']):
+                try:
+                    name = proc.info['name']
+                    if name and ('cs2' in name.lower() or 'counter' in name.lower()):
+                        logger.info(f"[ProcessManager] ✅ Найден процесс: {name} (PID: {proc.info['pid']})")
+                        return True
+                except:
+                    continue
+            
+            if attempt % 5 == 0:
+                logger.info(f"[ProcessManager] Попытка {attempt}: CS2 ещё не запущен...")
+                
             time.sleep(check_interval)
         
-        print(f"[ProcessManager] ❌ CS2 не запущен за {timeout} секунд")
+        logger.error(f"[ProcessManager] ❌ CS2 не запущен за {timeout} секунд")
         return False
+
+    @staticmethod
+    def set_process_priority(pid: int, priority: str = "high"):
+        """Установка приоритета процесса"""
+        try:
+            proc = psutil.Process(pid)
+            priorities = {
+                "low": psutil.BELOW_NORMAL_PRIORITY_CLASS,
+                "normal": psutil.NORMAL_PRIORITY_CLASS,
+                "high": psutil.HIGH_PRIORITY_CLASS,
+                "realtime": psutil.REALTIME_PRIORITY_CLASS
+            }
+            proc.nice(priorities.get(priority, psutil.NORMAL_PRIORITY_CLASS))
+            logger.info(f"[ProcessManager] ✅ Приоритет PID {pid} установлен: {priority}")
+            return True
+        except Exception as e:
+            logger.warning(f"[ProcessManager] ⚠️ Не удалось установить приоритет: {e}")
+            return False

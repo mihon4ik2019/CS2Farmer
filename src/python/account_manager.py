@@ -11,6 +11,7 @@ import win32api
 import psutil
 import random
 import winreg
+import urllib.parse
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict
 
@@ -18,7 +19,9 @@ from .database import Database
 from .process_manager import ProcessManager
 from .ban_checker import BanChecker
 from .models import Account, AccountStatus
-from .logger import logger
+from .logger import SecureLogger
+
+logger = SecureLogger()
 
 class AccountManager:
     """Менеджер аккаунтов для управления входом и запуском CS2"""
@@ -124,7 +127,7 @@ class AccountManager:
         return None
 
     def _find_login_window(self, timeout: int = 30) -> Optional[int]:
-        """Поиск окна входа Steam (РАСШИРЕННЫЙ СПИСОК ЗАГОЛОВКОВ)"""
+        """Поиск окна входа Steam"""
         titles = [
             "войдите", "вход", "steam", "login", "sign in",
             "авторизация", "авторизуйтесь", "authorize", "authentication",
@@ -146,37 +149,35 @@ class AccountManager:
         titles = ["steam"]
         return self._find_window_by_title_contains(titles, timeout)
 
+    def _find_cs2_window(self, timeout: int = 30) -> Optional[int]:
+        """Поиск окна CS2"""
+        titles = [
+            "counter-strike", "cs2", "counter strike",
+            "cs 2", "global offensive"
+        ]
+        return self._find_window_by_title_contains(titles, timeout)
+
     def _enter_credentials(self, username: str, password: str, code: str) -> bool:
         """Ввод учётных данных"""
         logger.info(f"[AccountManager] 👤 Ввод данных для: {username}")
         time.sleep(2)
         
         try:
-            # Ввод логина
             pyautogui.write(username, interval=0.05)
             time.sleep(0.5)
-            
-            # Переход к паролю
             pyautogui.press('tab')
             time.sleep(0.5)
-            
-            # Ввод пароля
             pyautogui.write(password, interval=0.05)
             time.sleep(0.5)
-            
-            # Отправка
             pyautogui.press('enter')
             logger.info(f"[AccountManager] ✅ Логин и пароль введены")
             
-            # Ожидание 2FA поля
             time.sleep(10)
             
-            # Переход к 2FA (обычно 3-4 tab)
             for i in range(4):
                 pyautogui.press('tab')
                 time.sleep(0.3)
             
-            # Ввод 2FA
             pyautogui.write(code, interval=0.05)
             time.sleep(0.5)
             pyautogui.press('enter')
@@ -257,6 +258,76 @@ class AccountManager:
                 return acc
         return None
 
+    def _launch_cs2_secure(self, steam_path: str, ipc_name: str, 
+                           steam_data_dir: str) -> bool:
+        """
+        Запуск CS2 - ИСПРАВЛЕННАЯ ВЕРСИЯ
+        """
+        steam_dir = os.path.dirname(steam_path)
+        
+        # === СПОСОБ 1: Steam URI (САМЫЙ НАДЁЖНЫЙ) ===
+        try:
+            logger.info(f"[AccountManager] 🎮 Способ 1: Запуск через steam://")
+            
+            params = " ".join(self.pm.CS2_LAUNCH_OPTIONS)
+            encoded_params = urllib.parse.quote(params)
+            steam_uri = f"steam://rungameid/730/{encoded_params}"
+            
+            steam_window = self._find_any_steam_window(timeout=10)
+            if steam_window:
+                try:
+                    win32gui.ShowWindow(steam_window, win32con.SW_RESTORE)
+                    win32gui.SetForegroundWindow(steam_window)
+                    time.sleep(2)
+                    logger.info(f"[AccountManager] ✅ Окно Steam активировано")
+                except:
+                    pass
+            
+            os.startfile(steam_uri)
+            logger.info(f"[AccountManager] ✅ Steam URI отправлен: {steam_uri}")
+            
+            time.sleep(5)
+            os.startfile(steam_uri)
+            logger.info(f"[AccountManager] ✅ Повторная отправка URI")
+            
+            return True
+        except Exception as e:
+            logger.error(f"[AccountManager] ❌ Способ 1 не сработал: {e}")
+
+        # === СПОСОБ 2: Через Steam с параметрами ===
+        try:
+            logger.info(f"[AccountManager] 🎮 Способ 2: Запуск через Steam CLI")
+            cmd = [
+                steam_path,
+                "-applaunch", "730"
+            ] + self.pm.CS2_LAUNCH_OPTIONS
+            
+            subprocess.Popen(cmd, cwd=steam_dir,
+                           creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+            logger.info(f"[AccountManager] ✅ Команда выполнена")
+            return True
+        except Exception as e:
+            logger.error(f"[AccountManager] ❌ Способ 2 не сработал: {e}")
+
+        # === СПОСОБ 3: Прямой запуск cs2.exe ===
+        cs2_exe = os.path.join(
+            steam_dir, "steamapps", "common", "Counter-Strike Global Offensive",
+            "game", "bin", "win64", "cs2.exe"
+        )
+        if os.path.exists(cs2_exe):
+            try:
+                logger.info(f"[AccountManager] 🎮 Способ 3: Прямой запуск cs2.exe")
+                cmd = [cs2_exe] + self.pm.CS2_LAUNCH_OPTIONS
+                subprocess.Popen(cmd, cwd=os.path.dirname(cs2_exe),
+                               creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+                logger.info(f"[AccountManager] ✅ Прямой запуск выполнен")
+                return True
+            except Exception as e:
+                logger.error(f"[AccountManager] ❌ Способ 3 не сработал: {e}")
+        
+        logger.error(f"[AccountManager] ❌ Все способы запуска CS2 не удались")
+        return False
+
     def start_accounts_sequential(self, account_ids: List[int], 
                                    progress_callback=None):
         """Последовательный запуск"""
@@ -265,7 +336,6 @@ class AccountManager:
             for i, acc_id in enumerate(account_ids):
                 logger.info(f"[AccountManager] ===== Запуск {i+1}/{total} =====")
                 
-                # СБРОС СТАТУСА ПЕРЕД ЗАПУСКОМ
                 acc = self.get_account(acc_id)
                 if acc:
                     acc.status = AccountStatus.STOPPED
@@ -288,43 +358,6 @@ class AccountManager:
             
         threading.Thread(target=run_sequential, daemon=True).start()
 
-    def _launch_cs2_secure(self, steam_path: str, ipc_name: str, 
-                           steam_data_dir: str) -> bool:
-        """Запуск CS2"""
-        steam_dir = os.path.dirname(steam_path)
-        
-        try:
-            logger.info(f"[AccountManager] 🎮 Запуск CS2 через Steam")
-            cmd = [
-                steam_path,
-                "-master_ipc_name_override", ipc_name,
-                "-fulldir", steam_data_dir,
-                "-applaunch", "730"
-            ] + self.pm.CS2_LAUNCH_OPTIONS
-            
-            subprocess.Popen(cmd, cwd=steam_dir,
-                           creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
-            logger.info(f"[AccountManager] ✅ Команда запуска CS2 выполнена")
-            return True
-        except Exception as e:
-            logger.error(f"[AccountManager] ❌ Ошибка запуска CS2: {e}")
-            
-        # Фолбэк
-        cs2_exe = os.path.join(
-            steam_dir, "steamapps", "common", "Counter-Strike Global Offensive",
-            "game", "bin", "win64", "cs2.exe"
-        )
-        if os.path.exists(cs2_exe):
-            try:
-                cmd = [cs2_exe] + self.pm.CS2_LAUNCH_OPTIONS
-                subprocess.Popen(cmd, cwd=os.path.dirname(cs2_exe),
-                               creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
-                return True
-            except Exception as e:
-                logger.error(f"[AccountManager] ❌ Фолбэк не удался: {e}")
-        
-        return False
-
     def start_account(self, account_id: int) -> bool:
         """Запуск аккаунта"""
         account = self.get_account(account_id)
@@ -342,7 +375,6 @@ class AccountManager:
             logger.warning(f"[AccountManager] ⚠️ Аккаунт не в статусе STOPPED")
             return False
 
-        # Проверка лимита
         last = self._last_attempt.get(account_id)
         if last and datetime.now() - last < self._rate_limit_delay:
             logger.warning(f"[AccountManager] ⏳ Лимит запросов для {account.username}")
@@ -351,7 +383,6 @@ class AccountManager:
             self.db.update_account(account)
             return False
 
-        # Проверка бана
         if account.steam_id:
             banned = self.ban_checker.check_account(account.steam_id)
             if banned:
@@ -364,7 +395,6 @@ class AccountManager:
         self.db.update_account(account)
         logger.info(f"[AccountManager] 🚀 Запуск: {account.username}")
 
-        # Проверка maFile
         if not account.ma_file_path:
             logger.error(f"[AccountManager] ❌ Нет maFile для {account.username}")
             account.status = AccountStatus.ERROR
@@ -390,7 +420,6 @@ class AccountManager:
 
         self._last_attempt[account_id] = datetime.now()
 
-        # Поиск Steam
         steam_path = self.pm.find_steam_path()
         if not steam_path:
             logger.error(f"[AccountManager] ❌ Steam не найден")
@@ -399,13 +428,11 @@ class AccountManager:
             self.db.update_account(account)
             return False
 
-        # Подготовка папки данных
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         steam_data_dir = os.path.join(base_dir, 'steam_data', account.username)
         os.makedirs(steam_data_dir, exist_ok=True)
         logger.info(f"[AccountManager] 📁 Steam data: {steam_data_dir}")
 
-        # Генерация IPC
         windows_username = os.getlogin()
         random_suffix = random.randint(1000, 9999)
         ipc_name = f"steam_{windows_username}_{account.username}_{account_id}_{random_suffix}"[:60]
@@ -448,12 +475,10 @@ class AccountManager:
         logger.info(f"[AccountManager] 🔍 Поиск окна входа...")
         login_window = self._find_login_window(timeout=30)
         
-        # Если окно входа не найдено, ищем библиотеку (уже авторизован)
         if not login_window:
             logger.info(f"[AccountManager] 🔍 Окно входа не найдено, поиск библиотеки...")
             login_window = self._find_library_window(timeout=30)
         
-        # Если всё ещё не найдено, ищем любое окно Steam
         if not login_window:
             logger.info(f"[AccountManager] 🔍 Поиск любого окна Steam...")
             login_window = self._find_any_steam_window(timeout=30)
@@ -465,7 +490,6 @@ class AccountManager:
             self.db.update_account(account)
             return False
 
-        # Активация окна
         logger.info(f"[AccountManager] ✅ Окно найдено, активация...")
         try:
             win32gui.ShowWindow(login_window, win32con.SW_RESTORE)
@@ -474,14 +498,12 @@ class AccountManager:
         except Exception as e:
             logger.warning(f"[AccountManager] ⚠️ Ошибка активации окна: {e}")
 
-        # Ввод данных
         if not self._enter_credentials(account.username, account.password, twofactor_code):
             account.status = AccountStatus.ERROR
             account.status_message = "Credential input failed"
             self.db.update_account(account)
             return False
 
-        # Ожидание входа
         logger.info(f"[AccountManager] ⏳ Ожидание авторизации (30 сек)...")
         time.sleep(30)
 
@@ -496,22 +518,28 @@ class AccountManager:
         logger.info(f"[AccountManager] 🎮 ЗАПУСК CS2...")
         self._launch_cs2_secure(steam_path, ipc_name, steam_data_dir)
 
-        # Ожидание CS2
-        cs2_found = self.pm.wait_for_cs2(timeout=60, check_interval=2)
+        cs2_found = self.pm.wait_for_cs2(timeout=120, check_interval=3)
         
         if not cs2_found:
-            logger.warning(f"[AccountManager] ⚠️ CS2 не обнаружен")
+            logger.warning(f"[AccountManager] ⚠️ CS2 не обнаружен в процессах")
+            for proc in psutil.process_iter(['pid', 'name']):
+                try:
+                    name = proc.info['name']
+                    if name and ('cs2' in name.lower() or 'counter' in name.lower()):
+                        logger.info(f"[AccountManager] ⚠️ Найден похожий процесс: {name} (PID: {proc.info['pid']})")
+                        cs2_found = True
+                        break
+                except:
+                    pass
 
         account.status = AccountStatus.IN_GAME
         account.last_login = datetime.now()
         self.db.update_account(account)
         logger.info(f"[AccountManager] ✅ Аккаунт запущен: {account.username} (PID: {pid})")
 
-        # BES
         time.sleep(8)
         self._apply_bes_to_process("cs2.exe", 50)
 
-        # Счётчик времени
         stop_event = threading.Event()
         self._stop_flags[account_id] = stop_event
         
