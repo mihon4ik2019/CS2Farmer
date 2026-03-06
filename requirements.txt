@@ -1,0 +1,13 @@
+customtkinter==5.2.2
+pywin32==306
+pycryptodome==3.20.0
+Pillow==10.3.0
+requests==2.31.0
+plotly==5.18.0
+kaleido==0.2.1
+CTkToolTip==0.7
+CTkMessagebox==2.5
+pyautogui==0.9.54
+CTkTable==1.1
+psutil==5.9.8
+keyboard==0.13.5

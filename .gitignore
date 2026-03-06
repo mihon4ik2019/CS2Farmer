@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.dll
+*.exe
+*.log
+*.db
+*.ini
+*.spec
+build/
+dist/
+*.egg-info/
+
+# Проект
+data/
+steam_data/
+mafiles/*.maFile   # если не хотите выкладывать maFile
+BES/               # если BES лежит в папке проекта
+steam_launcher.log
+*.ico
