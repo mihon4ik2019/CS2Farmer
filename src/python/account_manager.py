@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import time
 import threading
@@ -6,15 +7,9 @@ import subprocess
 import pyautogui
 import win32gui
 import win32con
-import win32process
 import win32api
-import base64
-import hmac
-import hashlib
-import struct
 import psutil
 import random
-import shutil
 import tempfile
 import winreg
 from datetime import datetime, timedelta
@@ -26,6 +21,8 @@ from .ban_checker import BanChecker
 from .models import Account, AccountStatus
 
 class AccountManager:
+    """Менеджер аккаунтов для управления входом и запуском CS2"""
+    
     def __init__(self, db: Database, pm: ProcessManager, ban_checker: BanChecker):
         self.db = db
         self.pm = pm
@@ -37,6 +34,7 @@ class AccountManager:
         self.steam_instances = {}
 
     def _find_bes(self) -> Optional[str]:
+        """Поиск пути к BES.exe для ограничения CPU"""
         possible_paths = [
             r"C:\Users\mihon\Desktop\CS2Farmer\BES\BES.exe",
             r"C:\Program Files\BES\BES.exe",
@@ -52,6 +50,7 @@ class AccountManager:
         return None
 
     def _apply_bes_to_process(self, process_name: str = "cs2.exe", limit: int = 50):
+        """Применение ограничения CPU через BES"""
         if not self.bes_path:
             return False
         try:
@@ -65,7 +64,13 @@ class AccountManager:
             return False
 
     def _generate_2fa_code(self, shared_secret: str) -> str:
+        """Генерация 2FA кода из shared_secret"""
         time.sleep(random.uniform(0.1, 0.5))
+        import hmac
+        import hashlib
+        import struct
+        import base64
+        
         time_buffer = struct.pack('>Q', int(time.time()) // 30)
         hmac_hash = hmac.new(base64.b64decode(shared_secret), time_buffer, hashlib.sha1).digest()
         start = hmac_hash[19] & 0x0F
@@ -78,6 +83,7 @@ class AccountManager:
         return code
 
     def _fix_steamwebhelper(self):
+        """Завершение зависших процессов steamwebhelper"""
         print(f"[AccountManager] 🔧 Проверка steamwebhelper...")
         try:
             for proc in psutil.process_iter(['pid', 'name']):
@@ -92,7 +98,7 @@ class AccountManager:
         print(f"[AccountManager] ✅ Проверка завершена")
 
     def _fix_steam_protocol(self):
-        """Исправление ассоциации протокола steam:// в реестре Windows"""
+        """Исправление ассоциации протокола steam:// в реестре"""
         print(f"[AccountManager] 🔧 Проверка протокола steam://...")
         steam_path = self.pm.find_steam_path()
         if steam_path:
@@ -124,113 +130,146 @@ class AccountManager:
             return False
 
     def _verify_cs2_binary(self) -> bool:
-        """Проверка, что cs2.exe существует и доступен для запуска"""
+        """Проверка, что cs2.exe существует и доступен"""
         steam_path = self.pm.find_steam_path()
         if not steam_path:
             return False
         steam_dir = os.path.dirname(steam_path)
-        cs2_path = os.path.join(steam_dir, "steamapps", "common", "Counter-Strike Global Offensive",
-                                "game", "bin", "win64", "cs2.exe")
+        cs2_path = os.path.join(
+            steam_dir, "steamapps", "common", "Counter-Strike Global Offensive",
+            "game", "bin", "win64", "cs2.exe"
+        )
         if not os.path.exists(cs2_path):
-            print(f"[AccountManager] ❌ cs2.exe не найден по пути: {cs2_path}")
-            return False
-        if not os.access(cs2_path, os.X_OK):
-            print(f"[AccountManager] ⚠️ Нет прав на выполнение cs2.exe")
+            print(f"[AccountManager] ❌ cs2.exe не найден: {cs2_path}")
             return False
         print(f"[AccountManager] ✅ cs2.exe доступен: {cs2_path}")
         return True
 
     def _ensure_cs2_normal_privileges(self):
-        """Убирает флаг 'Запуск от имени администратора' для cs2.exe, если он был установлен"""
+        """Убирает флаг 'Запуск от имени администратора' для cs2.exe"""
         steam_path = self.pm.find_steam_path()
         if not steam_path:
-            return False
+            return
         steam_dir = os.path.dirname(steam_path)
-        cs2_path = os.path.join(steam_dir, "steamapps", "common", "Counter-Strike Global Offensive",
-                                "game", "bin", "win64", "cs2.exe")
+        cs2_path = os.path.join(
+            steam_dir, "steamapps", "common", "Counter-Strike Global Offensive",
+            "game", "bin", "win64", "cs2.exe"
+        )
         if not os.path.exists(cs2_path):
-            return False
+            return
         try:
-            # Удаляем запись из реестра, если она есть
-            reg_path = f"HKCU\\Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers"
+            reg_path = r"HKCU\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"
             cmd = f'reg delete "{reg_path}" /v "{cs2_path}" /f 2>nul'
             subprocess.run(cmd, shell=True)
             print(f"[AccountManager] ✅ Флаг администратора для cs2.exe снят")
-            return True
         except Exception as e:
-            print(f"[AccountManager] ⚠️ Не удалось снять флаг администратора: {e}")
-            return False
+            print(f"[AccountManager] ⚠️ Не удалось снять флаг: {e}")
 
-    def _find_window_by_title_contains(self, texts, timeout=60, interval=2):
+    def _find_window_by_title_contains(self, texts: List[str], timeout: int = 60, 
+                                        interval: int = 2) -> Optional[int]:
+        """Поиск окна по частичному совпадению заголовка"""
         print(f"[AccountManager] 🔍 Поиск окна по заголовкам {texts} (таймаут {timeout} сек)")
         start = time.time()
         attempt = 0
+        
         while time.time() - start < timeout:
             attempt += 1
-            all_windows = []
-            def debug_callback(hwnd, windows):
-                if win32gui.IsWindowVisible(hwnd):
-                    title = win32gui.GetWindowText(hwnd)
-                    if title:
-                        windows.append(f"HWND {hwnd}: {title}")
-            win32gui.EnumWindows(debug_callback, all_windows)
-            if attempt % 5 == 0:
-                print(f"[AccountManager] Текущие видимые окна (первые 10): {all_windows[:10]}")
-
+            
             def enum_callback(hwnd, windows):
-                title = win32gui.GetWindowText(hwnd).lower()
-                for t in texts:
-                    if t.lower() in title:
-                        windows.append((hwnd, title))
-                        return
+                try:
+                    if win32gui.IsWindowVisible(hwnd):
+                        title = win32gui.GetWindowText(hwnd).lower()
+                        for t in texts:
+                            if t.lower() in title:
+                                windows.append((hwnd, title))
+                                return
+                except:
+                    pass
+                    
             windows = []
             win32gui.EnumWindows(enum_callback, windows)
+            
             if windows:
                 hwnd, title = windows[0]
-                print(f"[AccountManager] ✅ Окно найдено на попытке {attempt}: HWND {hwnd}, заголовок: '{title}'")
+                print(f"[AccountManager] ✅ Окно найдено на попытке {attempt}: HWND {hwnd}, '{title}'")
                 return hwnd
+                
+            if attempt % 5 == 0:
+                print(f"[AccountManager] Попытка {attempt}: окно ещё не найдено...")
+                
             time.sleep(interval)
+            
         print(f"[AccountManager] ❌ Окно не найдено за {timeout} секунд")
         return None
 
-    def _find_login_window(self, timeout=60):
-        return self._find_window_by_title_contains(["войдите", "steam", "login"], timeout)
+    def _find_login_window(self, timeout: int = 60) -> Optional[int]:
+        """Поиск окна входа Steam"""
+        return self._find_window_by_title_contains(
+            ["войдите", "steam", "login", "sign in", "вход"], timeout
+        )
 
-    def _find_library_window(self, timeout=60):
-        return self._find_window_by_title_contains(["библиотека", "library", "steam"], timeout)
+    def _find_library_window(self, timeout: int = 60) -> Optional[int]:
+        """Поиск окна библиотеки Steam"""
+        return self._find_window_by_title_contains(
+            ["библиотека", "library", "steam"], timeout
+        )
 
-    def _enter_credentials(self, username, password, code):
+    def _enter_credentials(self, username: str, password: str, code: str) -> bool:
+        """Ввод учётных данных в окно входа Steam"""
         print(f"[AccountManager] 👤 Начинаем ввод данных")
         time.sleep(3)
-        print(f"[AccountManager] ⌨️ Ввод логина: '{username}'")
-        pyautogui.write(username, interval=0.1)
-        time.sleep(1)
-        pyautogui.press('tab')
-        print(f"[AccountManager] ⏹️ Tab")
-        time.sleep(1)
-        print(f"[AccountManager] ⌨️ Ввод пароля: {'*' * len(password)}")
-        pyautogui.write(password, interval=0.1)
-        time.sleep(1)
-        pyautogui.press('enter')
-        print(f"[AccountManager] ↵ Нажатие Enter (отправка логина)")
-        print(f"[AccountManager] ⏳ Ожидание 15 секунд для появления запроса 2FA...")
-        time.sleep(15)
-        for i in range(4):
+        
+        try:
+            # Ввод логина
+            print(f"[AccountManager] ⌨️ Ввод логина: '{username}'")
+            pyautogui.write(username, interval=0.1)
+            time.sleep(1)
+            
+            # Переход к полю пароля
             pyautogui.press('tab')
-            print(f"[AccountManager] Tab {i+1}/4")
-            time.sleep(0.5)
-        print(f"[AccountManager] ⌨️ Ввод 2FA кода: {code}")
-        pyautogui.write(code, interval=0.1)
-        time.sleep(1)
-        pyautogui.press('enter')
-        print(f"[AccountManager] ✅ 2FA код отправлен")
-        return True
+            print(f"[AccountManager] ⏹️ Tab к паролю")
+            time.sleep(1)
+            
+            # Ввод пароля
+            print(f"[AccountManager] ⌨️ Ввод пароля: {'*' * len(password)}")
+            pyautogui.write(password, interval=0.1)
+            time.sleep(1)
+            
+            # Отправка формы
+            pyautogui.press('enter')
+            print(f"[AccountManager] ↵ Enter отправлен")
+            
+            # Ожидание появления 2FA поля
+            print(f"[AccountManager] ⏳ Ожидание 15 секунд для появления 2FA...")
+            time.sleep(15)
+            
+            # Переход к полю 2FA (4 tab)
+            for i in range(4):
+                pyautogui.press('tab')
+                print(f"[AccountManager] Tab {i+1}/4")
+                time.sleep(0.5)
+            
+            # Ввод 2FA кода
+            print(f"[AccountManager] ⌨️ Ввод 2FA кода: {code}")
+            pyautogui.write(code, interval=0.1)
+            time.sleep(1)
+            
+            # Отправка 2FA
+            pyautogui.press('enter')
+            print(f"[AccountManager] ✅ 2FA код отправлен")
+            
+            return True
+        except Exception as e:
+            print(f"[AccountManager] ❌ Ошибка ввода данных: {e}")
+            return False
 
     def _scan_mafiles(self) -> Dict[str, Dict[str, str]]:
+        """Сканирование папки mafiles для поиска файлов аутентификации"""
         result = {}
         mafiles_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'mafiles')
+        
         if not os.path.exists(mafiles_dir):
-            print(f"[AccountManager] mafiles directory not found: {mafiles_dir}")
+            print(f"[AccountManager] ⚠️ mafiles directory not found: {mafiles_dir}")
             return result
 
         for filename in os.listdir(mafiles_dir):
@@ -242,7 +281,7 @@ class AccountManager:
                     data = json.load(f)
                 username = data.get('account_name')
                 if not username:
-                    print(f"[AccountManager] maFile {filename} has no account_name")
+                    print(f"[AccountManager] ⚠️ maFile {filename} has no account_name")
                     continue
                 steam_id = None
                 session = data.get('Session')
@@ -253,24 +292,28 @@ class AccountManager:
                     'steam_id': steam_id,
                     'shared_secret': data.get('shared_secret')
                 }
-                print(f"[AccountManager] Found maFile for {username} with SteamID {steam_id}")
+                print(f"[AccountManager] ✅ Found maFile for {username} (SteamID: {steam_id})")
             except Exception as e:
-                print(f"[AccountManager] Error reading maFile {filename}: {e}")
+                print(f"[AccountManager] ❌ Error reading maFile {filename}: {e}")
                 continue
         return result
 
     def import_from_file(self, file_path: str) -> int:
+        """Импорт аккаунтов из файла формата login:password"""
         mafiles_map = self._scan_mafiles()
         count = 0
+        
         with open(file_path, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if not line or ':' not in line:
                     continue
                 username, password = line.split(':', 1)
+                
                 ma_file_info = mafiles_map.get(username)
                 ma_file_path = ma_file_info['path'] if ma_file_info else None
                 steam_id = ma_file_info['steam_id'] if ma_file_info else None
+                
                 existing = [a for a in self.db.get_accounts() if a.username == username]
                 if existing:
                     acc = existing[0]
@@ -285,6 +328,7 @@ class AccountManager:
                         self.db.update_account(acc)
                         print(f"[AccountManager] Updated existing account {username}")
                     continue
+                    
                 acc_id = self.db.add_account(username, password, ma_file_path)
                 if steam_id:
                     acc = self.get_account(acc_id)
@@ -296,100 +340,117 @@ class AccountManager:
         return count
 
     def get_all(self) -> List[Account]:
+        """Получение всех аккаунтов"""
         return self.db.get_accounts()
 
     def get_account(self, account_id: int) -> Optional[Account]:
+        """Получение аккаунта по ID"""
         for acc in self.get_all():
             if acc.id == account_id:
                 return acc
         return None
 
-    def start_accounts_sequential(self, account_ids: List[int], progress_callback=None):
+    def start_accounts_sequential(self, account_ids: List[int], 
+                                   progress_callback=None):
+        """Последовательный запуск аккаунтов с интервалом"""
         def run_sequential():
             total = len(account_ids)
             for i, acc_id in enumerate(account_ids):
                 print(f"[AccountManager] ===== Запуск аккаунта {i+1}/{total} =====")
                 self._fix_steamwebhelper()
                 self._fix_steam_protocol()
-                # Убираем флаг администратора для cs2.exe (важно!)
                 self._ensure_cs2_normal_privileges()
+                
                 success = self.start_account(acc_id)
+                
                 if progress_callback:
                     progress_callback(i + 1, total)
+                    
                 if i < total - 1:
                     wait_time = 40
-                    print(f"[AccountManager] Ожидание {wait_time} секунд перед следующим запуском...")
+                    print(f"[AccountManager] ⏳ Ожидание {wait_time} сек перед следующим запуском...")
                     time.sleep(wait_time)
+                    
             print(f"[AccountManager] ✅ Все {total} аккаунтов обработаны")
+            
         threading.Thread(target=run_sequential, daemon=True).start()
 
-    def _launch_cs2_secure(self, steam_path, ipc_name, steam_data_dir) -> bool:
+    def _launch_cs2_secure(self, steam_path: str, ipc_name: str, 
+                           steam_data_dir: str) -> bool:
         """
-        Запуск CS2 с обычными правами (не от администратора), чтобы избежать IPC-конфликтов.
+        Запуск CS2 с корректной передачей параметров.
+        ИСПРАВЛЕННАЯ ВЕРСИЯ - использует список аргументов вместо строки
         """
         steam_dir = os.path.dirname(steam_path)
-        cs2_exe = os.path.join(steam_dir, "steamapps", "common", "Counter-Strike Global Offensive",
-                               "game", "bin", "win64", "cs2.exe")
+        cs2_exe = os.path.join(
+            steam_dir, "steamapps", "common", "Counter-Strike Global Offensive",
+            "game", "bin", "win64", "cs2.exe"
+        )
         
-        # Способ 1: Запуск через Steam с параметрами (игра запускается с обычными правами)
+        # === СПОСОБ 1: Через Steam с параметрами (ПРЕДПОЧТИТЕЛЬНЫЙ) ===
         try:
-            print(f"[AccountManager] 🎮 Способ 1: Запуск через Steam с параметрами")
-            cs2_cmd = [
+            print(f"[AccountManager] 🎮 Способ 1: Запуск через Steam с IPC")
+            cmd = [
                 steam_path,
                 "-master_ipc_name_override", ipc_name,
                 "-fulldir", steam_data_dir,
-                "-applaunch", "730",
-                "+engine_no_focus_sleep", "120"
-            ]
-            subprocess.Popen(cs2_cmd, shell=False)
+                "-applaunch", "730"
+            ] + self.pm.CS2_LAUNCH_OPTIONS  # Используем СПИСОК, не строку!
+            
+            subprocess.Popen(cmd, cwd=steam_dir,
+                           creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
             print(f"[AccountManager] ✅ Команда запуска CS2 выполнена")
             return True
         except Exception as e:
             print(f"[AccountManager] ⚠️ Способ 1 не сработал: {e}")
 
-        # Способ 2: Прямой запуск cs2.exe с обычными правами (если способ 1 не сработал)
+        # === СПОСОБ 2: Прямой запуск cs2.exe ===
         if os.path.exists(cs2_exe):
             try:
-                print(f"[AccountManager] 🎮 Способ 2: Прямой запуск cs2.exe (обычные права)")
-                cs2_params = "-windowed -w 640 -h 480 -novid -nojoy -nosound +engine_no_focus_sleep 120"
-                # Запускаем без runas, чтобы игра имела обычные права
-                subprocess.Popen([cs2_exe] + cs2_params.split())
+                print(f"[AccountManager] 🎮 Способ 2: Прямой запуск cs2.exe")
+                cmd = [cs2_exe] + self.pm.CS2_LAUNCH_OPTIONS
+                subprocess.Popen(cmd, cwd=os.path.dirname(cs2_exe),
+                               creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
                 print(f"[AccountManager] ✅ Прямой запуск выполнен")
                 return True
             except Exception as e:
                 print(f"[AccountManager] ⚠️ Способ 2 не сработал: {e}")
 
-        # Способ 3: Steam URL с параметрами (запасной)
+        # === СПОСОБ 3: Steam URI (запасной) ===
         try:
-            print(f"[AccountManager] 🎮 Способ 3: Запуск через steam:// с параметрами")
-            cs2_options = "-swapcores -noqueuedload -vrdisable -windowed -nopreload -limitvsconst -softparticlesdefaultoff -nohltv -noaafonts -nosound -novid +violence_hblood 0 +sethdmodels 0 +mat_disable_fancy_blending 1 +r_dynamic 0 +engine_no_focus_sleep 120"
-            encoded_options = cs2_options.replace(' ', '/')
-            steam_uri = f"steam://rungameid/730//{encoded_options}"
-            cmd = f'cmd /c start "" "{steam_uri}"'
-            subprocess.Popen(cmd, shell=True)
-            print(f"[AccountManager] ✅ Steam URL запущен")
+            print(f"[AccountManager] 🎮 Способ 3: Запуск через steam://")
+            import urllib.parse
+            params = " ".join(self.pm.CS2_LAUNCH_OPTIONS)
+            encoded = urllib.parse.quote(params)
+            steam_uri = f"steam://rungameid/730/{encoded}"
+            os.startfile(steam_uri)
+            print(f"[AccountManager] ✅ Steam URI запущен")
             return True
         except Exception as e:
             print(f"[AccountManager] ❌ Все способы запуска не удались: {e}")
             return False
 
     def start_account(self, account_id: int) -> bool:
+        """Запуск аккаунта: вход в Steam + запуск CS2"""
         account = self.get_account(account_id)
         if not account:
             print(f"[AccountManager] ❌ Account {account_id} not found")
             return False
+            
         if account.status != AccountStatus.STOPPED:
-            print(f"[AccountManager] ⚠️ Account {account.username} is not stopped (status={account.status})")
+            print(f"[AccountManager] ⚠️ Account {account.username} not stopped (status={account.status})")
             return False
 
+        # Проверка лимита запросов
         last = self._last_attempt.get(account_id)
         if last and datetime.now() - last < self._rate_limit_delay:
-            print(f"[AccountManager] ⏳ Too many attempts for {account.username}, please wait")
+            print(f"[AccountManager] ⏳ Too many attempts for {account.username}")
             account.status = AccountStatus.ERROR
             account.status_message = "Превышен лимит запросов Steam. Подождите 10 минут."
             self.db.update_account(account)
             return False
 
+        # Проверка бана
         if account.steam_id:
             banned = self.ban_checker.check_account(account.steam_id)
             if banned:
@@ -406,8 +467,9 @@ class AccountManager:
         self.db.update_account(account)
         print(f"[AccountManager] 🚀 Starting account {account.username}")
 
+        # Проверка maFile
         if not account.ma_file_path:
-            print(f"[AccountManager] ❌ No maFile for {account.username}, cannot login with 2FA")
+            print(f"[AccountManager] ❌ No maFile for {account.username}")
             account.status = AccountStatus.ERROR
             account.status_message = "No maFile provided"
             self.db.update_account(account)
@@ -431,6 +493,7 @@ class AccountManager:
 
         self._last_attempt[account_id] = datetime.now()
 
+        # Поиск Steam
         steam_path = self.pm.find_steam_path()
         if not steam_path:
             print(f"[AccountManager] ❌ Steam not found")
@@ -439,165 +502,141 @@ class AccountManager:
             self.db.update_account(account)
             return False
 
+        # Подготовка изолированной папки данных Steam
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         steam_data_dir = os.path.join(base_dir, 'steam_data', account.username)
         os.makedirs(steam_data_dir, exist_ok=True)
-        print(f"[AccountManager] 📁 Папка данных Steam: {steam_data_dir}")
+        print(f"[AccountManager] 📁 Steam data dir: {steam_data_dir}")
 
+        # Генерация уникального IPC имени
         windows_username = os.getlogin()
         random_suffix = random.randint(1000, 9999)
         raw_ipc = f"steam_{windows_username}_{account.username}_{account_id}_{random_suffix}"
         ipc_name = raw_ipc[:60]
 
-        # Запуск Steam через bat-файл с правами администратора
-        bat_content = f'start "" "{steam_path}" -master_ipc_name_override {ipc_name} -fulldir "{steam_data_dir}" -no-cef-sandbox'
-        if random.choice([True, False]):
-            bat_content += " -nofriendsui"
-        if random.choice([True, False]):
-            bat_content += " -vgui"
-        bat_path = os.path.join(tempfile.gettempdir(), f"steam_launch_{account_id}.bat")
-        with open(bat_path, "w") as f:
-            f.write(bat_content)
-
-        print(f"[AccountManager] 🖥️ Запуск изолированного Steam с IPC: {ipc_name} (от имени администратора)")
-        pid = None
+        # Запуск Steam
+        print(f"[AccountManager] 🖥️ Запуск изолированного Steam (IPC: {ipc_name})")
+        cmd = [
+            steam_path,
+            "-master_ipc_name_override", ipc_name,
+            "-fulldir", steam_data_dir,
+            "-no-cef-sandbox",
+            "-nofriendsui"
+        ]
+        
         try:
-            win32api.ShellExecute(0, "runas", bat_path, None, None, win32con.SW_SHOW)
-            print(f"[AccountManager] ✅ Команда запуска Steam выполнена (runas)")
-        except Exception as e:
-            print(f"[AccountManager] ❌ Ошибка запуска через runas: {e}, пробуем обычный Popen")
-            cmd = f'"{steam_path}" -master_ipc_name_override {ipc_name} -fulldir "{steam_data_dir}" -no-cef-sandbox'
-            if random.choice([True, False]):
-                cmd += " -nofriendsui"
-            if random.choice([True, False]):
-                cmd += " -vgui"
-            process = subprocess.Popen(cmd, shell=True)
+            process = subprocess.Popen(cmd, cwd=os.path.dirname(steam_path),
+                                      creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
             pid = process.pid
             self.steam_instances[account_id] = (process, ipc_name, pid)
+            print(f"[AccountManager] ✅ Steam запущен с PID {pid}")
+        except Exception as e:
+            print(f"[AccountManager] ❌ Ошибка запуска Steam: {e}")
+            account.status = AccountStatus.ERROR
+            account.status_message = f"Steam launch failed: {e}"
+            self.db.update_account(account)
+            return False
 
-        if pid is None:
-            time.sleep(5)
-            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-                if proc.info['name'] and proc.info['name'].lower() == 'steam.exe':
-                    cmdline = ' '.join(proc.info['cmdline'] or [])
-                    if ipc_name in cmdline:
-                        pid = proc.info['pid']
-                        print(f"[AccountManager] Найден Steam с PID {pid} для IPC {ipc_name}")
-                        break
-
-        if pid:
-            self.steam_instances[account_id] = (None, ipc_name, pid)
-
-        print(f"[AccountManager] ✅ Изолированный Steam запущен, PID: {pid}")
+        # Ожидание запуска Steam
         time.sleep(15)
-
+        
         if not psutil.pid_exists(pid):
-            print(f"[AccountManager] ❌ Процесс Steam с PID {pid} внезапно завершился")
+            print(f"[AccountManager] ❌ Steam process died")
             account.status = AccountStatus.ERROR
             account.status_message = "Steam process died"
             self.db.update_account(account)
             return False
 
-        # ПОИСК ОКНА ВХОДА
-        print(f"[AccountManager] 🔍 Начинаем поиск окна входа по заголовку...")
+        # Поиск окна входа
+        print(f"[AccountManager] 🔍 Поиск окна входа...")
         login_window = None
         for attempt in range(6):
             login_window = self._find_login_window(timeout=10)
             if login_window:
                 break
-            print(f"[AccountManager] Попытка {attempt+1}/6: окно входа не найдено, ждём...")
+            print(f"[AccountManager] Попытка {attempt+1}/6: окно входа не найдено")
             time.sleep(10)
+            
         if not login_window:
-            print(f"[AccountManager] ❌ Окно входа не найдено после 60 секунд, прекращаем")
+            print(f"[AccountManager] ❌ Окно входа не найдено")
             account.status = AccountStatus.ERROR
             account.status_message = "Login window not found"
             self.db.update_account(account)
             return False
 
-        print(f"[AccountManager] ✅ Окно входа найдено, активируем его")
+        # Активация окна и ввод данных
+        print(f"[AccountManager] ✅ Окно входа найдено")
         win32gui.ShowWindow(login_window, win32con.SW_RESTORE)
         win32gui.SetForegroundWindow(login_window)
         time.sleep(3)
-        try:
-            self._enter_credentials(account.username, account.password, twofactor_code)
-            print(f"[AccountManager] ✅ Данные введены, ожидание входа...")
-            time.sleep(20)
-        except Exception as e:
-            print(f"[AccountManager] ❌ Ошибка при вводе данных: {e}")
+        
+        if not self._enter_credentials(account.username, account.password, twofactor_code):
             account.status = AccountStatus.ERROR
-            account.status_message = str(e)
+            account.status_message = "Credential input failed"
             self.db.update_account(account)
             return False
 
+        # Ожидание входа
+        print(f"[AccountManager] ⏳ Ожидание входа в аккаунт...")
+        time.sleep(20)
+
         if not psutil.pid_exists(pid):
-            print(f"[AccountManager] ❌ Процесс Steam с PID {pid} завершился после входа")
+            print(f"[AccountManager] ❌ Steam crashed after login")
             account.status = AccountStatus.ERROR
             account.status_message = "Steam crashed after login"
             self.db.update_account(account)
             return False
 
-        print(f"[AccountManager] 🔍 Ожидание окна библиотеки Steam...")
+        # Поиск окна библиотеки
+        print(f"[AccountManager] 🔍 Ожидание окна библиотеки...")
         library_window = None
         for attempt in range(12):
             library_window = self._find_library_window(timeout=5)
             if library_window:
                 break
-            print(f"[AccountManager] Попытка {attempt+1}/12: окно библиотеки не найдено, ждём...")
             time.sleep(5)
+            
         if library_window:
-            print(f"[AccountManager] ✅ Окно библиотеки найдено, вход выполнен")
+            print(f"[AccountManager] ✅ Вход выполнен успешно")
         else:
-            print(f"[AccountManager] ⚠️ Окно библиотеки не найдено, но продолжаем...")
+            print(f"[AccountManager] ⚠️ Окно библиотеки не найдено, продолжаем...")
 
-        print(f"[AccountManager] ⏳ Дополнительное ожидание 30 секунд для полной загрузки Steam...")
+        # Дополнительное ожидание
         time.sleep(30)
 
-        # ЗАПУСК CS2 - ТЕПЕРЬ С ОБЫЧНЫМИ ПРАВАМИ
+        # === ЗАПУСК CS2 ===
+        print(f"[AccountManager] 🎮 ЗАПУСК CS2...")
         cs2_started = self._launch_cs2_secure(steam_path, ipc_name, steam_data_dir)
 
-        # Ожидание появления процесса CS2
-        print(f"[AccountManager] ⏳ Ожидание запуска CS2 (до 60 секунд)...")
-        cs2_found = False
-        for attempt in range(30):
-            time.sleep(2)
-            for proc in psutil.process_iter(['pid', 'name']):
-                if proc.info['name'] and proc.info['name'].lower() == 'cs2.exe':
-                    cs2_found = True
-                    print(f"[AccountManager] ✅ Процесс CS2 обнаружен на попытке {attempt+1} (PID {proc.info['pid']})")
-                    break
-            if cs2_found:
-                break
-            print(f"[AccountManager] Попытка {attempt+1}/30: CS2 не обнаружен, ждём...")
-
+        # Ожидание процесса CS2
+        cs2_found = self.pm.wait_for_cs2(timeout=60, check_interval=2)
+        
         if not cs2_found:
-            print(f"[AccountManager] ⚠️ Процесс CS2 не обнаружен после запуска")
-            time.sleep(5)
-            for proc in psutil.process_iter(['pid', 'name']):
-                if proc.info['name'] and proc.info['name'].lower() == 'cs2.exe':
-                    cs2_found = True
-                    print(f"[AccountManager] ✅ Процесс CS2 найден при повторной проверке (PID {proc.info['pid']})")
-                    break
-            if not cs2_found:
-                print(f"[AccountManager] ❌ CS2 действительно не запустился")
+            print(f"[AccountManager] ⚠️ CS2 не обнаружен, но продолжаем...")
 
         account.status = AccountStatus.IN_GAME
         account.last_login = datetime.now()
         self.db.update_account(account)
-        print(f"[AccountManager] ✅ Account {account.username} started successfully (Steam PID {pid})")
+        print(f"[AccountManager] ✅ Account {account.username} started (Steam PID {pid})")
 
+        # Применение BES
         time.sleep(8)
         self._apply_bes_to_process("cs2.exe", 50)
 
+        # Запуск счётчика времени
         stop_event = threading.Event()
         self._stop_flags[account_id] = stop_event
+        
         def update_time():
             while not stop_event.wait(60):
                 account.play_time_minutes += 1
                 self.db.update_account(account)
+                
         threading.Thread(target=update_time, daemon=True).start()
         return True
 
     def stop_account(self, account_id: int):
+        """Остановка аккаунта"""
         account = self.get_account(account_id)
         if account:
             account.status = AccountStatus.STOPPED
@@ -610,7 +649,7 @@ class AccountManager:
                     for child in parent.children(recursive=True):
                         child.terminate()
                     parent.terminate()
-                    print(f"[AccountManager] 🛑 Завершён экземпляр Steam для {account.username} (PID {pid})")
+                    print(f"[AccountManager] 🛑 Steam instance stopped for {account.username} (PID {pid})")
                 except:
                     pass
                 del self.steam_instances[account_id]
@@ -620,6 +659,7 @@ class AccountManager:
                 del self._stop_flags[account_id]
 
     def stop_all(self):
+        """Остановка всех аккаунтов"""
         for acc_id, (process, ipc_name, pid) in list(self.steam_instances.items()):
             try:
                 parent = psutil.Process(pid)

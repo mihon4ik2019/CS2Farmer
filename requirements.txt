@@ -11,3 +11,4 @@ pyautogui==0.9.54
 CTkTable==1.1
 psutil==5.9.8
 keyboard==0.13.5
+urllib3>=1.26.0
