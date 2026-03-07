@@ -1,23 +1,31 @@
-# Python
+# === КОНФИДЕНЦИАЛЬНЫЕ ФАЙЛЫ ===
+mafiles/*.maFile
+logpass.txt
+passwords.txt
+*.password
+
+# === ДАННЫЕ STEAM ===
+steam_data/
+
+# === БАЗЫ ДАННЫХ ===
+data/*.db
+data/*.sqlite
+
+# === ЛОГИ ===
+data/*.log
+logs/
+*.log
+
+# === ВРЕМЕННЫЕ ФАЙЛЫ ===
 __pycache__/
 *.pyc
 *.pyo
-*.pyd
-*.so
-*.dll
-*.exe
-*.log
-*.db
-*.ini
-*.spec
-build/
-dist/
-*.egg-info/
+.env
+.venv/
+venv/
 
-# Проект
-data/
-steam_data/
-mafiles/*.maFile   # если не хотите выкладывать maFile
-BES/               # если BES лежит в папке проекта
-steam_launcher.log
-*.ico
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
