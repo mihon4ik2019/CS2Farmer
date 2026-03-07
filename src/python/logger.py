@@ -1,99 +1,78 @@
-#!/usr/bin/env python3
+"""
+Secure Logger - УЛУЧШЕННЫЙ
+С ротацией и детализацией
+"""
 import os
 import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from typing import Optional
 
+from . import config
+
+
 class SecureLogger:
-    """Система логирования для CS2 Farmer"""
-    
-    _instance: Optional['SecureLogger'] = None
-    
-    def __new__(cls, log_file: str = "logs/farmer.log", master_password: str = ""):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
-    
-    def __init__(self, log_file: str = "logs/farmer.log", master_password: str = ""):
-        if self._initialized:
-            return
+    def __init__(self, name: str = 'CS2Farmer'):
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(logging.DEBUG)
         
-        self.log_file = log_file
-        self.master_password = master_password
+        # Очистка старых handlers
+        self.logger.handlers.clear()
         
-        log_dir = os.path.dirname(log_file)
-        if log_dir:
-            os.makedirs(log_dir, exist_ok=True)
-        
-        if not log_file or log_file == "logs/farmer.log":
-            date_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            self.log_file = os.path.join("logs", f"farmer_{date_str}.log")
-        
-        self._logger = logging.getLogger("CS2Farmer")
-        self._logger.setLevel(logging.DEBUG)
-        self._logger.handlers.clear()
-        
-        file_handler = logging.FileHandler(self.log_file, encoding='utf-8')
-        file_handler.setLevel(logging.DEBUG)
-        file_format = logging.Formatter(
-            '%(asctime)s | %(levelname)-8s | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-        file_handler.setFormatter(file_format)
-        self._logger.addHandler(file_handler)
-        
+        # Console handler
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
-        console_format = logging.Formatter('%(message)s')
+        console_format = logging.Formatter(
+            '%(asctime)s | %(levelname)s | %(message)s',
+            datefmt='%H:%M:%S'
+        )
         console_handler.setFormatter(console_format)
-        self._logger.addHandler(console_handler)
+        self.logger.addHandler(console_handler)
         
-        self._initialized = True
-        self.info("=" * 60)
-        self.info("CS2 Farmer Panel - Логирование запущено")
-        self.info(f"Файл лога: {self.log_file}")
-        self.info("=" * 60)
+        # File handler с ротацией
+        if config.LOG_TO_FILE:
+            try:
+                os.makedirs(os.path.dirname(config.LOG_FILE), exist_ok=True)
+                
+                file_handler = RotatingFileHandler(
+                    config.LOG_FILE,
+                    maxBytes=config.MAX_LOG_SIZE_MB * 1024 * 1024,
+                    backupCount=5,
+                    encoding='utf-8'
+                )
+                file_handler.setLevel(logging.DEBUG)
+                file_format = logging.Formatter(
+                    '%(asctime)s | %(levelname)s | %(name)s | %(funcName)s | %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S'
+                )
+                file_handler.setFormatter(file_format)
+                self.logger.addHandler(file_handler)
+            except Exception as e:
+                print(f"[Logger] ⚠️ Ошибка создания файла лога: {e}")
     
-    def log(self, level: str, msg: str):
-        level = level.upper()
-        if level == 'DEBUG':
-            self.debug(msg)
-        elif level == 'INFO':
-            self.info(msg)
-        elif level == 'WARNING':
-            self.warning(msg)
-        elif level == 'ERROR':
-            self.error(msg)
-        elif level == 'CRITICAL':
-            self.critical(msg)
-        else:
-            self.info(msg)
+    def info(self, message: str):
+        self.logger.info(message)
     
-    def debug(self, msg: str):
-        if self._logger:
-            self._logger.debug(msg)
+    def debug(self, message: str):
+        if config.ENABLE_DETAILED_LOGS:
+            self.logger.debug(message)
     
-    def info(self, msg: str):
-        if self._logger:
-            self._logger.info(msg)
+    def warning(self, message: str):
+        self.logger.warning(message)
     
-    def warning(self, msg: str):
-        if self._logger:
-            self._logger.warning(msg)
+    def error(self, message: str):
+        self.logger.error(message)
+        if config.LOG_TO_UI:
+            print(f"[ERROR] {message}")
     
-    def error(self, msg: str):
-        if self._logger:
-            self._logger.error(msg)
+    def critical(self, message: str):
+        self.logger.critical(message)
     
-    def critical(self, msg: str):
-        if self._logger:
-            self._logger.critical(msg)
+    def success(self, message: str):
+        self.logger.info(f"✅ {message}")
     
-    def get_log_file(self) -> str:
-        return self.log_file
-    
-    def get_log_dir(self) -> str:
-        return os.path.dirname(self.log_file) or "logs"
+    def step(self, step_name: str, message: str = ''):
+        self.logger.info(f"▶️ {step_name} {message}")
 
-logger = SecureLogger()
+
+logger = SecureLogger() 
