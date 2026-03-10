@@ -24,6 +24,7 @@ from ctypes import windll
 import math
 import csv
 from pathlib import Path
+import tkinter as tk
 
 from ..database import Database
 from ..process_manager import ProcessManager
