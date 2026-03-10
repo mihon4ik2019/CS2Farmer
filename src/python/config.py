@@ -1,9 +1,10 @@
 """
 CS2Farmer Configuration - ТОЧНЫЕ НАСТРОЙКИ ИЗ FSM PANEL v.2.8.5
-Из settings.json + cs2_video.txt
+30 FPS LIMIT + Оптимизация + Все настройки FSM
 """
 import os
 
+# === БАЗОВЫЕ ПУТИ ===
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 MAFILES_DIR = os.path.join(BASE_DIR, 'mafiles')
@@ -12,6 +13,18 @@ SETTINGS_DIR = os.path.join(BASE_DIR, 'settings')
 STEAM_DATA_DIR = os.path.join(BASE_DIR, 'steam_data')
 DB_PATH = os.path.join(DATA_DIR, 'cs2farmer.db')
 LOG_FILE = os.path.join(DATA_DIR, 'secure.log')
+
+# === ЛОГИРОВАНИЕ ===
+ENABLE_DETAILED_LOGS = True
+LOG_TO_FILE = True
+LOG_TO_UI = True
+LOG_BES_APPLICATION = True
+LOG_WINDOW_POSITION = True
+LOG_PROCESS_INFO = True
+LOG_CS2_WAIT_STATUS = False
+CS2_WAIT_LOG_INTERVAL = 10
+MAX_LOG_SIZE_MB = 10
+LOG_ROTATION = True
 
 # === STEAM ПАРАМЕТРЫ (ИЗ FSM PANEL settings.json) ===
 STEAM_LAUNCH_OPTIONS = [
@@ -31,7 +44,7 @@ STEAM_LAUNCH_OPTIONS = [
 ]
 DISABLE_STEAM_OVERLAY = True
 
-# === CS2 ПАРАМЕТРЫ (ИЗ FSM PANEL ADDITIONAL_LAUNCH_OPTIONS) ===
+# === CS2 ПАРАМЕТРЫ (ИЗ FSM PANEL ADDITIONAL_LAUNCH_OPTIONS + 30 FPS) ===
 CS2_LAUNCH_OPTIONS = [
     # Разрешение (из FSM Panel - 360x270)
     "-windowed", "-w", "360", "-h", "270",
@@ -123,7 +136,10 @@ CS2_LAUNCH_OPTIONS = [
     "+r_waterforceexpensive", "0",
     "+r_waterforcereflectentities", "0",
     "+r_drawtracers_firstperson", "0",
-    "+fps_max", "30",
+    
+    # ✅ 30 FPS LIMIT (ДВА ПАРАМЕТРА ДЛЯ НАДЁЖНОСТИ)
+    "+fps_max", "30",              # ✅ Основной лимит
+    "+host_framerate", "30",       # ✅ Дополнительный лимит
 ]
 
 # === РАЗРЕШЕНИЕ (ИЗ FSM PANEL) ===
@@ -257,6 +273,7 @@ CLEANUP_ON_EXIT = True
 AUTO_RESTART_ON_CRASH = True
 MAX_RESTART_ATTEMPTS = 3
 
+# === СОЗДАНИЕ ДИРЕКТОРИЙ ===
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(MAFILES_DIR, exist_ok=True)
 os.makedirs(SESSIONS_DIR, exist_ok=True)

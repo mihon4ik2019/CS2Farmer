@@ -1,6 +1,5 @@
 """
-Process Manager - ПАРАМЕТРЫ ДЛЯ КАЖДОГО АККАУНТА
-Исправление: каждый аккаунт получает свои параметры
+Process Manager - BES ПО КНОПКЕ + ПОЗИЦИОНИРОВАНИЕ ПОСЛЕ ВСЕХ
 """
 import subprocess
 import time
@@ -9,7 +8,6 @@ import random
 import psutil
 import win32gui
 import win32con
-import threading
 from typing import Optional, Dict, Tuple, List
 from datetime import datetime
 
@@ -20,9 +18,6 @@ from .library_killer import LibraryKiller
 from .cs2_waiter import CS2Waiter
 from .window_manager import WindowManager
 from .steam_launcher import SteamLauncher
-from .fsm_settings import FSMSettings
-from .cs2_video_config import CS2VideoConfig
-from .steam_library_optimizer import SteamLibraryOptimizer
 from .logger import SecureLogger
 
 logger = SecureLogger()
@@ -42,38 +37,33 @@ class ProcessManager:
         self.cs2_waiter = CS2Waiter()
         self.window_manager = WindowManager()
         self.steam_launcher = SteamLauncher()
-        self.fsm_settings = FSMSettings()
-        self.video_config = CS2VideoConfig()
-        self.library_optimizer = SteamLibraryOptimizer()
         self.optimized = False
         self.start_time = datetime.now()
+        self.all_accounts_launched = False  # ✅ Флаг что все запущены
     
     def optimize_once(self):
         if not self.optimized:
             logger.step("Оптимизация", "...")
-            self.library_optimizer.optimize_library_load()
+            from .steam_library_optimizer import SteamLibraryOptimizer
+            optimizer = SteamLibraryOptimizer()
+            optimizer.optimize_library_load()
             self.optimized = True
             logger.success("Оптимизация завершена")
     
     def clear_cs2_tracker(self):
         self.cs2_waiter.clear_known_pids()
         self.window_manager.clear_all_positions()
-        if config.RESET_WINDOW_POSITION_ON_START:
+        if getattr(config, 'RESET_WINDOW_POSITION_ON_START', True):
             self.account_positions.clear()
             self.instance_count = 0
-        logger.debug("[ProcessManager] Трекер CS2 очищен")
+        self.all_accounts_launched = False
     
     def get_total_cs2_count(self) -> int:
         return self.cs2_waiter.get_total_cs2_count()
     
-    def get_uptime(self) -> str:
-        uptime = datetime.now() - self.start_time
-        return str(uptime).split('.')[0]
-    
     def get_next_account_index(self) -> int:
         index = self.instance_count % 4
         self.instance_count += 1
-        logger.debug(f"[ProcessManager] Позиция аккаунта: {index}")
         return index
     
     @staticmethod
@@ -96,18 +86,15 @@ class ProcessManager:
         os.system("taskkill /f /im steam.exe 2>nul")
         os.system("taskkill /f /im steamwebhelper.exe 2>nul")
         time.sleep(3)
-        logger.success("Steam завершён")
 
     def kill_all_cs2(self):
         os.system("taskkill /f /im cs2.exe 2>nul")
         time.sleep(2)
-        logger.debug("CS2 завершён")
 
     def set_high_priority(self, pid: int) -> bool:
         try:
             process = psutil.Process(pid)
             process.nice(psutil.HIGH_PRIORITY_CLASS)
-            logger.debug(f"[ProcessManager] ⚡ HIGH Priority (PID: {pid})")
             return True
         except:
             return False
@@ -116,7 +103,6 @@ class ProcessManager:
         try:
             process = psutil.Process(pid)
             process.cpu_affinity(cores)
-            logger.debug(f"[ProcessManager] 🔗 Привязка к ядрам: {cores} (PID: {pid})")
             return True
         except:
             return False
@@ -135,26 +121,14 @@ class ProcessManager:
         account_index = self.get_next_account_index()
         self.account_positions[account_id] = account_index
         
-        # ✅ ПРИМЕНЯЕМ ВИДЕО НАСТРОЙКИ ДЛЯ КАЖДОГО АККАУНТА
-        self.video_config.apply_to_account(username)
-        
-        # ✅ ПАРАМЕТРЫ ИЗ CONFIG (ПРИМЕНЯЮТСЯ ДЛЯ КАЖДОГО)
-        launch_params = config.CS2_LAUNCH_OPTIONS.copy()
-        
-        # Добавляем из FSM settings
-        fsm_options = self.fsm_settings.get_launch_options()
-        if fsm_options:
-            launch_params.extend(fsm_options)
+        launch_params = list(getattr(config, 'CS2_LAUNCH_OPTIONS', []))
         
         if window_position and window_position != (0, 0):
             launch_params.extend(["+setpos", str(window_position[0]), str(window_position[1]), "0"])
         
-        logger.step("Запуск", f"#{account_index + 1} ({username}) - Позиция [{account_index}]")
-        logger.debug(f"[ProcessManager] Окно: {window_position}")
-        logger.debug(f"[ProcessManager] Разрешение: {config.CS_RESOLUTION}")
-        logger.debug(f"[ProcessManager] Параметры: {' '.join(launch_params[:5])}...")
+        logger.step("Запуск", f"#{account_index + 1} ({username})")
+        logger.info(f"[ProcessManager] Параметры ({len(launch_params)}): {' '.join(launch_params[:5])}...")
         
-        # ✅ ЗАПУСК С ПАРАМЕТРАМИ ДЛЯ КАЖДОГО АККАУНТА
         process, pid = self.steam_launcher.launch_steam(
             username=username,
             ipc_name=ipc_name,
@@ -163,23 +137,19 @@ class ProcessManager:
         )
         
         if not pid:
-            logger.error("[ProcessManager] Не удалось запустить Steam")
             return None, None
 
-        # HIGH PRIORITY для каждого
-        if config.HIGH_PRIORITY:
+        if getattr(config, 'HIGH_PRIORITY', True):
             time.sleep(1)
             self.set_high_priority(pid)
         
-        # PROCESS AFFINITY для каждого
-        if config.PROCESS_AFFINITY:
+        if getattr(config, 'PROCESS_AFFINITY', True):
             time.sleep(1)
             self.set_process_affinity(pid, [0, 1, 2, 3])
 
         time.sleep(10)
         
         if not psutil.pid_exists(pid):
-            logger.error("Steam процесс умер")
             return None, None
         
         self.steam_instances[account_id] = {
@@ -190,16 +160,14 @@ class ProcessManager:
             'window_position': window_position,
             'account_index': account_index,
             'start_time': datetime.now(),
-            'params_applied': launch_params  # ✅ Запись применённых параметров
         }
         
         return process, pid
 
     def wait_for_cs2_and_close_library(self, account_id: int, timeout: int = 180) -> bool:
         logger.step("Ожидание", f"CS2 для аккаунта {account_id}...")
-        logger.info(f"Ожидание загрузки: {config.CS2_LOAD_SECONDS}s")
         
-        load_seconds = config.CS2_LOAD_SECONDS if config.WAIT_CS2_LOAD else 0
+        load_seconds = getattr(config, 'CS2_LOAD_SECONDS', 25)
         success, cs2_pid = self.cs2_waiter.wait_for_new_cs2_process(
             timeout=timeout,
             load_seconds=load_seconds
@@ -216,58 +184,104 @@ class ProcessManager:
             'pid': cs2_pid,
             'window_position': window_position,
             'account_index': account_index,
-            'load_time': datetime.now()
+            'bes_applied': False  # ✅ BES не применён автоматически
         }
         
-        logger.info(f"[ProcessManager] Аккаунт {account_id} → Позиция [{account_index}] → {window_position}")
-        
-        # HIGH PRIORITY для каждого CS2
-        if config.HIGH_PRIORITY:
+        if getattr(config, 'HIGH_PRIORITY', True):
             self.set_high_priority(cs2_pid)
         
-        # PROCESS AFFINITY для каждого CS2
-        if config.PROCESS_AFFINITY:
+        if getattr(config, 'PROCESS_AFFINITY', True):
             time.sleep(1)
             self.set_process_affinity(cs2_pid, [0, 1, 2, 3])
         
-        # BES для каждого CS2
-        if config.BES_AUTO_APPLY:
-            time.sleep(2)
-            bes_success = self.bes.apply_to_cs2_fast(cs2_pid, config.BES_CPU_LIMIT)
-            
-            if config.LOG_BES_APPLICATION:
-                if bes_success:
-                    logger.success(f"BES применён к PID {cs2_pid}")
-                else:
-                    logger.warning(f"BES не применён к PID {cs2_pid}")
+        # ✅ BES НЕ ПРИМЕНЯЕТСЯ АВТОМАТИЧЕСКИ
+        logger.info(f"[ProcessManager] BES не применён (ожидание кнопки)")
         
-        # ЗАКРЫТИЕ БИБЛИОТЕКИ
-        if config.FORCE_CLOSE_LIBRARY:
-            logger.step("Закрытие", "библиотек Steam...")
+        # ✅ ЗАКРЫТИЕ БИБЛИОТЕКИ
+        if getattr(config, 'FORCE_CLOSE_LIBRARY', True):
+            logger.step("Закрытие", "библиотек...")
             self.library_killer.close_all_guaranteed(timeout=20)
-            
-            if not self.library_killer.wait_for_no_libraries(timeout=20):
-                logger.warning("Библиотеки не закрылись полностью")
-            else:
-                logger.success("Библиотеки закрыты")
+            self.library_killer.wait_for_no_libraries(timeout=20)
+            logger.success("Библиотеки закрыты")
         
-        # ПОЗИЦИОНИРОВАНИЕ (5 попыток)
-        time.sleep(3)
-        logger.step("Позиционирование", f"окна [{account_index}]...")
+        # ✅ ПОЗИЦИОНИРОВАНИЕ ТОЛЬКО ПОСЛЕ ВСЕХ
+        if not getattr(config, 'POSITION_WINDOWS_AFTER_ALL_LAUNCHED', False):
+            time.sleep(3)
+            self.position_cs2_window(account_id, window_position)
         
-        if self.window_manager.position_cs2_window(account_index, timeout=config.TIMEOUT_WINDOW_POSITION):
-            logger.success(f"Окно [{account_index}] позиционировано: {window_position}")
-        else:
-            logger.warning(f"Не удалось позиционировать окно [{account_index}]")
-        
-        logger.success(f"Аккаунт {account_id} полностью готов (позиция [{account_index}])")
+        logger.success(f"Аккаунт {account_id} готов")
         return True
 
-    def verify_all_windows(self) -> Dict[int, bool]:
-        return self.window_manager.verify_all_windows()
-    
-    def reposition_failed_windows(self) -> int:
-        return self.window_manager.reposition_failed_windows()
+    def mark_all_accounts_launched(self, total_accounts: int):
+        """
+        ✅ ОТМЕТИТЬ ЧТО ВСЕ АККАУНТЫ ЗАПУЩЕНЫ
+        """
+        self.all_accounts_launched = True
+        logger.info(f"[ProcessManager] Все {total_accounts} аккаунтов запущены")
+
+    def position_all_windows_after_launch(self, total_accounts: int):
+        """
+        ✅ ПОЗИЦИОНИРОВАНИЕ ВСЕХ ОКОН ПОСЛЕ ЗАПУСКА ВСЕХ АККАУНТОВ
+        """
+        if not self.all_accounts_launched:
+            logger.warning("[ProcessManager] Не все аккаунты запущены, ожидание...")
+            return
+        
+        logger.info(f"[ProcessManager] Позиционирование {total_accounts} окон...")
+        time.sleep(5)
+        
+        for account_id, cs2_info in self.cs2_instances.items():
+            window_position = cs2_info.get('window_position', (0, 0))
+            account_index = cs2_info.get('account_index', 0)
+            
+            logger.step("Позиционирование", f"окна [{account_index}]...")
+            
+            if self.window_manager.position_cs2_window(account_index, timeout=30):
+                logger.success(f"Окно [{account_index}] позиционировано: {window_position}")
+            else:
+                logger.warning(f"Не удалось позиционировать окно [{account_index}]")
+        
+        logger.success(f"Все {total_accounts} окон позиционированы")
+
+    def apply_bes_to_account(self, account_id: int) -> bool:
+        """
+        ✅ ПРИМЕНИТЬ BES К КОНКРЕТНОМУ АККАУНТУ (по кнопке)
+        """
+        if account_id not in self.cs2_instances:
+            logger.error(f"[ProcessManager] Аккаунт {account_id} не найден")
+            return False
+        
+        cs2_info = self.cs2_instances[account_id]
+        cs2_pid = cs2_info.get('pid')
+        
+        if not cs2_pid:
+            logger.error(f"[ProcessManager] PID не найден для аккаунта {account_id}")
+            return False
+        
+        # Применяем BES
+        bes_limit = getattr(config, 'BES_CPU_LIMIT', 25)
+        success = self.bes.apply_to_cs2_fast(cs2_pid, bes_limit)
+        
+        if success:
+            cs2_info['bes_applied'] = True
+            logger.success(f"[ProcessManager] BES применён к аккаунту {account_id} (PID: {cs2_pid})")
+        else:
+            logger.error(f"[ProcessManager] BES не применён к аккаунту {account_id}")
+        
+        return success
+
+    def is_bes_applied(self, account_id: int) -> bool:
+        """Проверить применён ли BES"""
+        if account_id not in self.cs2_instances:
+            return False
+        return self.cs2_instances[account_id].get('bes_applied', False)
+
+    def position_cs2_window(self, account_id: int, window_position: tuple) -> bool:
+        cs2_window = self.finder.find_cs2_window(timeout=30)
+        if cs2_window:
+            x, y = window_position
+            return self.finder.position_window(cs2_window, x, y, getattr(config, 'CS_WIDTH', 360), getattr(config, 'CS_HEIGHT', 270))
+        return False
 
     def find_login_window(self, timeout: int = 60) -> Optional[int]:
         return self.finder.find_steam_login(timeout)
@@ -283,43 +297,69 @@ class ProcessManager:
 
     def position_window(self, hwnd: int, x: int, y: int, width: int = None, height: int = None) -> bool:
         if width is None:
-            width = config.CS_WIDTH
+            width = getattr(config, 'CS_WIDTH', 360)
         if height is None:
-            height = config.CS_HEIGHT
+            height = getattr(config, 'CS_HEIGHT', 270)
         return self.finder.position_window(hwnd, x, y, width, height)
 
     def get_account_window_position(self, account_index: int) -> tuple:
+        """
+        ✅ СЕТКА 2x2 С УЧЁТОМ UI (окна не перекрывают программу)
+        Программа справа, окна слева
+        """
         col = account_index % 2
         row = account_index // 2
-        x = col * config.WINDOW_OFFSET_X
-        y = row * config.WINDOW_OFFSET_Y
-        logger.debug(f"[ProcessManager] Позиция [{account_index}]: ({x}, {y})")
+        # ✅ ОКНА СЛЕВА (не перекрывают UI который справа)
+        x = col * getattr(config, 'WINDOW_OFFSET_X', 360)
+        y = row * getattr(config, 'WINDOW_OFFSET_Y', 270)
         return (x, y)
 
     def kill_all_instances(self):
         logger.step("Завершение", "...")
         self.bes.remove_all_limits()
         self.kill_all_cs2()
-        if not config.KEEP_STEAM_RUNNING:
+        if not getattr(config, 'KEEP_STEAM_RUNNING', True):
             self.kill_all_steam()
-        else:
-            logger.info("Steam оставлен запущенным")
         self.steam_instances.clear()
         self.cs2_instances.clear()
         self.account_positions.clear()
         self.instance_count = 0
-        logger.success("Все процессы завершены")
+        self.all_accounts_launched = False
+        logger.success("Все завершено")
     
-    def get_status_report(self) -> Dict:
-        return {
-            'uptime': self.get_uptime(),
-            'steam_instances': len(self.steam_instances),
-            'cs2_instances': len(self.cs2_instances),
-            'total_cs2_processes': self.get_total_cs2_count(),
-            'bes_applied': self.bes.get_applied_count(),
-            'windows_positioned': len(self.window_manager.get_all_positioned()),
-            'account_positions': self.account_positions
-        }
+    def get_system_load(self) -> Dict:
+        """Получить нагрузку системы"""
+        try:
+            cpu_percent = psutil.cpu_percent(interval=0.5)
+            memory = psutil.virtual_memory()
+            
+            cs2_loads = []
+            for acc_id, cs2_info in self.cs2_instances.items():
+                pid = cs2_info.get('pid')
+                if pid:
+                    try:
+                        proc = psutil.Process(pid)
+                        cs2_loads.append({
+                            'account_id': acc_id,
+                            'pid': pid,
+                            'cpu': proc.cpu_percent(interval=0.1),
+                            'memory': proc.memory_info().rss // 1024 // 1024,
+                            'threads': proc.num_threads(),
+                            'bes_applied': cs2_info.get('bes_applied', False)
+                        })
+                    except:
+                        pass
+            
+            return {
+                'cpu': cpu_percent,
+                'memory_percent': memory.percent,
+                'memory_used_gb': memory.used // 1024 // 1024 // 1024,
+                'memory_total_gb': memory.total // 1024 // 1024 // 1024,
+                'cs2_processes': len(cs2_loads),
+                'cs2_loads': cs2_loads
+            }
+        except:
+            return {}
 
 
 process_manager = ProcessManager()
