@@ -1,31 +1,49 @@
+# === СБОРКА (НЕ ЗАГРУЖАТЬ) ===
+dist/
+build/
+*.exe
+*.pkg
+*.msi
+*.dmg
+
 # === КОНФИДЕНЦИАЛЬНЫЕ ФАЙЛЫ ===
+mafiles/
 mafiles/*.maFile
 logpass.txt
 passwords.txt
 *.password
+*.secret
 
 # === ДАННЫЕ STEAM ===
 steam_data/
 
-# === БАЗЫ ДАННЫХ ===
-data/*.db
-data/*.sqlite
-
-# === ЛОГИ ===
-data/*.log
-logs/
+# === БАЗЫ ДАННЫХ И ЛОГИ ===
+data/
+*.db
+*.sqlite
 *.log
+logs/
 
-# === ВРЕМЕННЫЕ ФАЙЛЫ ===
+# === PYTHON ===
 __pycache__/
 *.pyc
 *.pyo
-.env
-.venv/
+*.pyd
+.Python
+env/
 venv/
+.venv/
+*.egg-info/
+.eggs/
 
 # === IDE ===
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+
+# === ОС ===
+.DS_Store
+Thumbs.db
+desktop.ini
