@@ -1,40 +1,48 @@
-# === СБОРКА (НЕ ЗАГРУЖАТЬ) ===
-dist/
-build/
-*.exe
-*.pkg
-*.msi
-*.dmg
-
-# === КОНФИДЕНЦИАЛЬНЫЕ ФАЙЛЫ ===
+# === КРИТИЧЕСКИ ВАЖНО: НЕ ЗАГРУЖАТЬ (Конфиденциально) ===
 mafiles/
 mafiles/*.maFile
 logpass.txt
 passwords.txt
 *.password
 *.secret
-
-# === ДАННЫЕ STEAM ===
+sessions/
 steam_data/
 
 # === БАЗЫ ДАННЫХ И ЛОГИ ===
-data/
-*.db
-*.sqlite
-*.log
+data/*.db
+data/*.sqlite
+data/*.log
 logs/
+*.log
 
-# === PYTHON ===
+# === ВРЕМЕННЫЕ ФАЙЛЫ PYTHON ===
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
 .Python
-env/
-venv/
-.venv/
-*.egg-info/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
 .eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# === ВИРТУАЛЬНЫЕ ОКРУЖЕНИЯ ===
+.env
+.venv/
+venv/
+env/
+ENV/
 
 # === IDE ===
 .vscode/
@@ -42,8 +50,8 @@ venv/
 *.swp
 *.swo
 *~
+.DS_Store
 
 # === ОС ===
-.DS_Store
 Thumbs.db
 desktop.ini
