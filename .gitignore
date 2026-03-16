@@ -55,3 +55,21 @@ ENV/
 # === ОС ===
 Thumbs.db
 desktop.ini
+# === СБОРКА И ДИСТРИБУТИВЫ ===
+build/
+dist/
+*.exe
+*.pkg
+*.msi
+*.dmg
+*.app
+
+# === PYINSTALLER ===
+*.spec
+*.manifest
+*.toc
+
+# === ВРЕМЕННЫЕ ФАЙЛЫ ===
+*.tmp
+*.temp
+~*
