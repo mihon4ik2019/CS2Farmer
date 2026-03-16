@@ -1,0 +1,10 @@
+{
+    "regions": [
+        {"code": "EU", "name": "Europe", "flag": "🇪🇺"},
+        {"code": "US", "name": "United States", "flag": "🇺🇸"},
+        {"code": "RU", "name": "Russia", "flag": "🇷🇺"},
+        {"code": "AS", "name": "Asia", "flag": "🌏"},
+        {"code": "SA", "name": "South America", "flag": "🌎"},
+        {"code": "OC", "name": "Oceania", "flag": "🌏"}
+    ]
+}

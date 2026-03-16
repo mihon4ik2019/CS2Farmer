@@ -1,0 +1,13 @@
+{
+    "servers": [
+        {"id": "eu_west", "name": "Europe West", "region": "EU", "ping": "20-40ms"},
+        {"id": "eu_east", "name": "Europe East", "region": "EU", "ping": "30-50ms"},
+        {"id": "us_east", "name": "US East", "region": "US", "ping": "80-120ms"},
+        {"id": "us_west", "name": "US West", "region": "US", "ping": "100-150ms"},
+        {"id": "asia", "name": "Asia", "region": "AS", "ping": "150-200ms"},
+        {"id": "russia", "name": "Russia", "region": "RU", "ping": "40-80ms"},
+        {"id": "south_america", "name": "South America", "region": "SA", "ping": "120-180ms"},
+        {"id": "oceania", "name": "Oceania", "region": "OC", "ping": "200-250ms"}
+    ],
+    "default": "eu_west"
+}
